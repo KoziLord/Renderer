@@ -6,7 +6,7 @@ import "core:fmt"
 @private Unit :: struct{}
 try :: proc(r : VK.Result, loc := #caller_location)
 {
-    if r != .SUCCESS do panic(fmt.aprintfln("%v: %v", loc, r))
+    if r != .SUCCESS do panic(fmt.aprintfln("VULKAN ERROR: %v", r), loc)
 }
 SwapchainData :: struct
 {
@@ -32,7 +32,7 @@ MakeSwapchainError :: enum
 //formats: A list of formats to try, ordered by preference.
 //First compatible format will be used over any other.
 //
-//**Requires VK_KHR_swapchain to be enabled**.
+//**Requires VK_KHR_swapchain to be enabled**, .
 make_swapchain :: proc(device : VK.PhysicalDevice,
                        driver : VK.Device,
                        surface : VK.SurfaceKHR,
@@ -58,7 +58,7 @@ make_swapchain :: proc(device : VK.PhysicalDevice,
         availableFormats := make([]VK.SurfaceFormatKHR, formatCount)
         defer delete(availableFormats)
         try(VK.GetPhysicalDeviceSurfaceFormatsKHR(device, surface, &formatCount, &availableFormats[0]))
-        fmt.println(availableFormats)
+        //fmt.println(availableFormats)
         EXIT: for format in formats
         {
             for v in availableFormats
