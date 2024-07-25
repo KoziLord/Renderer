@@ -42,7 +42,7 @@ check_validation_layer_support :: proc() -> (found : bool)
         {
             available := available
             a := cstring(&available.layerName[0])
-            fmt.println(a)
+            //fmt.println(a)
             if layer == a
             {
                 found = true
@@ -88,20 +88,23 @@ main :: proc()
         fmt.println("Could not get Instance Extensions")
     }
     check_validation_layer_support()
+    
     vkInstance : VK.Instance
     {
+        appInfo := VK.ApplicationInfo{
+            sType = .APPLICATION_INFO,
+            apiVersion = VK.API_VERSION_1_3,
+        }
         info := VK.InstanceCreateInfo{
-            .INSTANCE_CREATE_INFO,
-            nil,
-            {},
-            nil,
-            //u32(len(validationLayers)),
-            //&validationLayers[0],
-            0,nil,
-            extensionCount,
-            &extensionNames[0]
+            sType = .INSTANCE_CREATE_INFO,
+            flags = {},
+            
+            pApplicationInfo = &appInfo,
+            enabledExtensionCount = extensionCount,
+            ppEnabledExtensionNames = &extensionNames[0],
         }
 
+        
         try(VK.CreateInstance(&info, nil, &vkInstance))
         not_nil(vkInstance)
         VK.load_proc_addresses_instance(vkInstance)
@@ -115,21 +118,26 @@ main :: proc()
     try(VK.EnumeratePhysicalDevices(vkInstance, &deviceCount, &devices[0]))
     physicalDevice := devices[0]
     
-    EXTENSIONS_SUPPORT:
+    requiredExtensions := [dynamic]cstring{
+        VK.KHR_SWAPCHAIN_EXTENSION_NAME,
+        VK.KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
+            VK.KHR_DEPTH_STENCIL_RESOLVE_EXTENSION_NAME,
+                VK.KHR_CREATE_RENDERPASS_2_EXTENSION_NAME,
+        VK.NV_FILL_RECTANGLE_EXTENSION_NAME,
+    }
+
+    DEVICE_EXTENSIONS_SUPPORT:
     {
         Unit :: struct{}
-        required := map[cstring]Unit{
-            VK.KHR_SWAPCHAIN_EXTENSION_NAME = {},
-            VK.KHR_DYNAMIC_RENDERING_EXTENSION_NAME = {},
-            VK.NV_FILL_RECTANGLE_EXTENSION_NAME = {},
-        }
+        required := map[cstring]Unit{}
+        for e in requiredExtensions do map_insert(&required, e, Unit{})
         defer delete(required)
 
         extensionsCount : u32
         try(VK.EnumerateDeviceExtensionProperties(physicalDevice, nil, &extensionsCount, nil))
         extensions := make([]VK.ExtensionProperties, extensionsCount)
         try(VK.EnumerateDeviceExtensionProperties(physicalDevice, nil, &extensionsCount, &extensions[0]))
-        for &e in extensions do fmt.println(cast(cstring)&e.extensionName[0])
+        //for &e in extensions do fmt.println(cast(cstring)&e.extensionName[0])
     
         for &e in extensions
         {
@@ -154,7 +162,8 @@ main :: proc()
             panic(strings.to_string(builder))
         }
     }
-
+    
+    
     queueFamilyCount : u32
     VK.GetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyCount, nil)
     queueFamilies := make([]VK.QueueFamilyProperties, queueFamilyCount)
@@ -185,20 +194,24 @@ main :: proc()
         1,
         &queuePriority
     }
+    dynRen := VK.PhysicalDeviceDynamicRenderingFeatures{
+        sType = .PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES,
+    }
+    deviceFeatures := VK.PhysicalDeviceFeatures2{
+        sType = .PHYSICAL_DEVICE_FEATURES_2,
+        pNext = &dynRen,
+    }
+    
+    VK.GetPhysicalDeviceFeatures2(physicalDevice, &deviceFeatures)
 
-    deviceFeatures : VK.PhysicalDeviceFeatures
-    deviceExtensionNames := cstring(VK.KHR_SWAPCHAIN_EXTENSION_NAME)
     createInfo := VK.DeviceCreateInfo{
-        VK.StructureType.DEVICE_CREATE_INFO,
-        nil,
-        {},
-        1,
-        &queueInfo,
-        0,
-        nil,
-        1,
-        &deviceExtensionNames,
-        &deviceFeatures
+        sType = VK.StructureType.DEVICE_CREATE_INFO,
+        pNext = &dynRen,
+        queueCreateInfoCount = 1,
+        pQueueCreateInfos = &queueInfo,
+        enabledExtensionCount = u32(len(requiredExtensions)),
+        ppEnabledExtensionNames = raw_data(requiredExtensions),
+        pEnabledFeatures = nil,
     }
 
     device : VK.Device
@@ -247,15 +260,17 @@ main :: proc()
                 try(VK.CreateShaderModule(device, &createInfo, nil, &fragModule))
             }
 
-            stages : [2]VK.PipelineShaderStageCreateInfo = VK.PipelineShaderStageCreateInfo{
-                sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-            }
+            stages : [2]VK.PipelineShaderStageCreateInfo
             stages[0] = {
+                sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+
                 stage = { .VERTEX },
                 module = vertModule,
                 pName = "main", 
             }
             stages[1] = {
+                sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+
                 stage = { .FRAGMENT },
                 module = fragModule,
                 pName = "main",
@@ -299,6 +314,7 @@ main :: proc()
                 rasterizerDiscardEnable = false,
                 polygonMode = .FILL,
 
+                lineWidth = 1,
                 cullMode = {},
                 frontFace = .CLOCKWISE,
                 depthBiasEnable = false,
@@ -322,7 +338,7 @@ main :: proc()
                 
                 logicOpEnable = false,
                 logicOp = .COPY,
-                attachmentCount = 1,
+                attachmentCount = 0,
                 pAttachments = &VK.PipelineColorBlendAttachmentState{
                     colorWriteMask = {.R, .G, .B, .A},
                     blendEnable = false,
@@ -341,13 +357,14 @@ main :: proc()
                     minDepth = 0,
                     maxDepth = 1,
                 },
+                scissorCount = 1,
                 pScissors = &VK.Rect2D{
                     offset = {0, 0},
                     extent = {800, 600},
                 }
             }
         }
-        VK.pipelinerendering
+
         try(VK.CreateGraphicsPipelines(device, {}, 1, &pipelineCreateInfo, nil, &pipeline))   
     }
 
@@ -358,6 +375,7 @@ main :: proc()
             flags = {.RESET_COMMAND_BUFFER},
             queueFamilyIndex = queueIndex,
         }
+
         try(VK.CreateCommandPool(device, &createInfo, nil, &commandPool))
     }
     
@@ -371,8 +389,44 @@ main :: proc()
             commandBufferCount = 1,
         }
 
-        try(VK.AllocateCommandBuffers(device, &allocInfo, &commandBuffer))
+        try(VK.AllocateCommandBuffers(device, &allocInfo, &commandBuffer))     
+    }
+    
+    renderingInfo := VK.RenderingInfo{
+        sType = .RENDERING_INFO_KHR,
 
+        flags = {},
+        renderArea = {{0, 0}, {800, 600}},
+        layerCount = 1,
+        colorAttachmentCount = 1,
+        pColorAttachments = &VK.RenderingAttachmentInfo{
+            sType = .RENDERING_ATTACHMENT_INFO,
+
+            imageView = swapchain.ImageViews[0],
+            imageLayout = .ATTACHMENT_OPTIMAL,
+            loadOp = .CLEAR,
+            storeOp = .STORE,
+            clearValue = {color = {float32 = {0, 0, 0, 1}}}
+        }
+    }
+    imageAvailable, renderFinished : VK.Semaphore
+    {
+        createInfo := VK.SemaphoreCreateInfo{
+            sType = .SEMAPHORE_CREATE_INFO,
+        }
+        try(VK.CreateSemaphore(device, &createInfo, nil, &imageAvailable))
+        try(VK.CreateSemaphore(device, &createInfo, nil, &renderFinished))
+    }
+    fence : VK.Fence
+    {
+        createInfo := VK.FenceCreateInfo{
+            sType = .FENCE_CREATE_INFO,
+            flags = { .SIGNALED },
+        }
+        try(VK.CreateFence(device, &createInfo, nil, &fence))
+    }
+
+    {
         beginInfo := VK.CommandBufferBeginInfo{
             sType = .COMMAND_BUFFER_BEGIN_INFO,
             flags = {},
@@ -380,16 +434,12 @@ main :: proc()
         }
 
         try(VK.BeginCommandBuffer(commandBuffer, &beginInfo))
+        
+        //fmt.println(renderingInfo)
+        VK.CmdBeginRendering(commandBuffer, &renderingInfo)
     }
+
     
-    renderPass : VK.RenderPass
-    {
-        beginfInfo := VK.RenderPassBeginInfo{
-            sType = .RENDER_PASS_BEGIN_INFO,
-            
-        }
-    }
-    VK.CmdBeginRenderingKHR()
     proc() {panic("Ran successfully!\n")}()
     
     run := true
