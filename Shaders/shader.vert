@@ -1,8 +1,14 @@
-#version 450 core
+#version 450
 
 //layout (location = 0) in vec2 VertPos;
 
 void main()
 {
+    const vec3 positions[3] = vec3[3](
+        vec3(1.f,  1.f, 0.0f),
+        vec3(-1.f, 1.f, 0.0f),
+        vec3(0.f, -1.f, 0.0f)
+    )
 
+    gl_Position = vec3(positions[gl_VertexIndex], 1.0f);
 }

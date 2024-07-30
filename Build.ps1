@@ -5,6 +5,10 @@ foreach ($lib in $libs)
     Copy-Item -Path $lib.FullName -Destination ("./bin/" + $lib.Name)
 }
 
+If ($args -match "-shaders") 
+{
+    & .\Shaders\Compile.ps1
+}
 $command = If ($args -match "-ex") {"OdinEx "} Else {"odin "}
 
 $command += If ($args -match "-r") {"run "} Else {"build "}

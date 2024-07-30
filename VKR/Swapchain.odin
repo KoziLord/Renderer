@@ -12,6 +12,7 @@ SwapchainData :: struct
 {
     Swapchain : VK.SwapchainKHR,
     Format : VK.Format,
+    Extent : VK.Extent2D,
     Images : []VK.Image,
     ImageViews : []VK.ImageView,
 }
@@ -141,6 +142,7 @@ make_swapchain :: proc(device : VK.PhysicalDevice,
     return SwapchainData{
         swapchain,
         bestFormat.format,
+        transmute(VK.Extent2D)dimensions,
         images,
         imageViews,
     }

@@ -1,24 +1,17 @@
 package Renderer
 
-
-//
-
-
-//TODO SHADERS WOW
-
-
-//
 import "core:fmt"
 import "core:math"
 import "vendor:SDL2"
 import IMG "vendor:SDL2/image"
 import TTF "vendor:SDL2/ttf"
-import "../KGL"
 import VK "vendor:vulkan"
 import "core:c"
 import "base:intrinsics"
 import "./VKR"
 import "core:strings"
+import "core:reflect"
+import "base:runtime"
 
 SDL :: SDL2
 
@@ -57,8 +50,11 @@ main :: proc()
 {
     _ = SDL2.Init(SDL2.INIT_EVERYTHING)   
     defer SDL2.Quit()
-    
-    window : ^SDL2.Window = SDL2.CreateWindow("Epic Window!!!", 400, 400, 800, 600, SDL2.WindowFlags{.VULKAN})
+    dimensions := [2]u32{800, 600}
+    window : ^SDL2.Window = SDL2.CreateWindow("Epic Window!!!",
+                                              400,                 400,
+                                              c.int(dimensions.x), c.int(dimensions.y),
+                                              SDL2.WindowFlags{.VULKAN})
     defer SDL2.DestroyWindow((window))
     
     VK.GetInstanceProcAddr = cast(VK.ProcGetInstanceProcAddr)SDL.Vulkan_GetVkGetInstanceProcAddr()
@@ -102,6 +98,8 @@ main :: proc()
             pApplicationInfo = &appInfo,
             enabledExtensionCount = extensionCount,
             ppEnabledExtensionNames = &extensionNames[0],
+            enabledLayerCount = u32(len(validationLayers)),
+            ppEnabledLayerNames = &validationLayers[0],
         }
 
         
@@ -123,6 +121,8 @@ main :: proc()
         VK.KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
             VK.KHR_DEPTH_STENCIL_RESOLVE_EXTENSION_NAME,
                 VK.KHR_CREATE_RENDERPASS_2_EXTENSION_NAME,
+            VK.EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME,
+            //VK.EXT_SHADER_OBJECT_EXTENSION_NAME,
         VK.NV_FILL_RECTANGLE_EXTENSION_NAME,
     }
 
@@ -194,28 +194,34 @@ main :: proc()
         1,
         &queuePriority
     }
-    dynRen := VK.PhysicalDeviceDynamicRenderingFeatures{
-        sType = .PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES,
-    }
-    deviceFeatures := VK.PhysicalDeviceFeatures2{
-        sType = .PHYSICAL_DEVICE_FEATURES_2,
-        pNext = &dynRen,
-    }
-    
-    VK.GetPhysicalDeviceFeatures2(physicalDevice, &deviceFeatures)
-
-    createInfo := VK.DeviceCreateInfo{
-        sType = VK.StructureType.DEVICE_CREATE_INFO,
-        pNext = &dynRen,
-        queueCreateInfoCount = 1,
-        pQueueCreateInfos = &queueInfo,
-        enabledExtensionCount = u32(len(requiredExtensions)),
-        ppEnabledExtensionNames = raw_data(requiredExtensions),
-        pEnabledFeatures = nil,
-    }
 
     device : VK.Device
-    try(VK.CreateDevice(physicalDevice, &createInfo, nil, &device))
+    {
+        dynRen := VK.PhysicalDeviceDynamicRenderingFeatures{
+            sType = .PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES,
+        }
+        extState3 := VK.PhysicalDeviceExtendedDynamicState3FeaturesEXT{
+            sType = .PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_3_FEATURES_EXT,
+            pNext = &dynRen,
+        }
+        deviceFeatures := VK.PhysicalDeviceFeatures2{
+            sType = .PHYSICAL_DEVICE_FEATURES_2,
+            pNext = &extState3,
+        }
+        
+        VK.GetPhysicalDeviceFeatures2(physicalDevice, &deviceFeatures)
+
+        createInfo := VK.DeviceCreateInfo{
+            sType = VK.StructureType.DEVICE_CREATE_INFO,
+            pNext = &deviceFeatures,
+            queueCreateInfoCount = 1,
+            pQueueCreateInfos = &queueInfo,
+            enabledExtensionCount = u32(len(requiredExtensions)),
+            ppEnabledExtensionNames = raw_data(requiredExtensions),
+            pEnabledFeatures = nil,
+        }
+        try(VK.CreateDevice(physicalDevice, &createInfo, nil, &device))
+    }
 
     graphicsQueue : VK.Queue
     VK.GetDeviceQueue(device, queueIndex, 0, &graphicsQueue)
@@ -223,12 +229,13 @@ main :: proc()
     swapchain : VKR.SwapchainData
     {
         switch v in VKR.make_swapchain(physicalDevice, device, surface, queueIndex,
-                                       {800, 600}, .MAILBOX, .SRGB_NONLINEAR, {.B8G8R8A8_SRGB})
+                                       {dimensions.x, dimensions.y}, .MAILBOX, .SRGB_NONLINEAR, {.B8G8R8A8_SRGB})
         {
             case VKR.SwapchainData: swapchain = v
             case VKR.MakeSwapchainError: panic(fmt.aprintln("Swapchain error:", v))
         } 
     }
+    
     
     //Pipeline init
     pipeline : VK.Pipeline
@@ -352,15 +359,15 @@ main :: proc()
                 pViewports = &VK.Viewport{
                     x = 0,
                     y = 0,
-                    width = 800,
-                    height = 600,
+                    width = f32(dimensions.x),
+                    height = f32(dimensions.y),
                     minDepth = 0,
                     maxDepth = 1,
                 },
                 scissorCount = 1,
                 pScissors = &VK.Rect2D{
                     offset = {0, 0},
-                    extent = {800, 600},
+                    extent = {dimensions.x, dimensions.y},
                 }
             }
         }
@@ -396,7 +403,7 @@ main :: proc()
         sType = .RENDERING_INFO_KHR,
 
         flags = {},
-        renderArea = {{0, 0}, {800, 600}},
+        renderArea = {{0, 0}, {dimensions.x, dimensions.y}},
         layerCount = 1,
         colorAttachmentCount = 1,
         pColorAttachments = &VK.RenderingAttachmentInfo{
@@ -434,14 +441,17 @@ main :: proc()
         }
 
         try(VK.BeginCommandBuffer(commandBuffer, &beginInfo))
-        
-        //fmt.println(renderingInfo)
-        VK.CmdBeginRendering(commandBuffer, &renderingInfo)
     }
-
+  
+    VK.CmdBeginRendering(commandBuffer, &renderingInfo)
     
+    VK.CmdBindPipeline(commandBuffer, .GRAPHICS, pipeline)
+
+    VK.CmdDraw(commandBuffer, 3, 1, 0, 0)
+    VK.CmdEndRendering(commandBuffer)
     proc() {panic("Ran successfully!\n")}()
     
+
     run := true
     for run
     {
@@ -462,8 +472,13 @@ main :: proc()
         
         Drawing:
         {
-
-            
+            VK.CmdBeginRendering(commandBuffer, &renderingInfo)
+    
+            VK.CmdBindPipeline(commandBuffer, .GRAPHICS, pipeline)
+            //VK.CmdClearColorImage
+            //VK.CmdClear
+            VK.CmdDraw(commandBuffer, 3, 1, 0, 0)
+            VK.CmdEndRendering(commandBuffer)                  
         }
         
     }
@@ -477,9 +492,26 @@ try_sdl :: proc(r : c.int loc := #caller_location)
     if r == 0 do return
 
     error := SDL.GetError()
-    fmt.println("%v: %s", loc, error)
+    panic(fmt.aprintf("%s", error), loc)
 }
 not_nil :: proc(ptr : $T, loc := #caller_location)// where intrinsics.type_is_pointer(T) || intrinsics.type_is_proc(T)
 {
-    if ptr == nil do panic("Value was nil")
+    
+    if ptr == nil 
+    {
+        /*
+        s : string
+        info := type_info_of(T)
+        #partial switch info in info.variant
+        {
+            case runtime.Type_Info_Named: s = fmt.aprintf("Value was nil | %v.%v",info.pkg, info.name)
+            case runtime.runtime.Type_Info_Pointer:
+            {
+                for info := info; info.elem
+            }
+            case: s = fmt.aprintf("Value was nil | %v", typeid_of(T))
+        }
+        */
+        panic(fmt.aprintf("Value was nil | %v", typeid_of(T)), loc)
+    }
 }
