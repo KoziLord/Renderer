@@ -12,6 +12,7 @@ import "./VKR"
 import "core:strings"
 import "core:reflect"
 import "base:runtime"
+import "core:mem"
 
 SDL :: SDL2
 
@@ -71,20 +72,22 @@ main :: proc()
         (cast(^rawptr) p)^ = cast(rawptr) ptr
     })
 
-    extensionCount : c.uint
-    if !SDL2.Vulkan_GetInstanceExtensions(window, &extensionCount, nil)
+    //SDL VULKAN EXTENSIONS
     {
-        fmt.println("Could not get Instance Extensions count")
-    }
+        extensionCount : c.uint
+        if !SDL2.Vulkan_GetInstanceExtensions(window, &extensionCount, nil)
+        {
+            fmt.println("Could not get Instance Extensions count")
+        }
 
-    
-    extensionNames := make([]cstring, extensionCount)
-    if !SDL2.Vulkan_GetInstanceExtensions(window, &extensionCount, &extensionNames[0])
-    {
-        fmt.println("Could not get Instance Extensions")
+        
+        extensionNames := make([]cstring, extensionCount)
+        if !SDL2.Vulkan_GetInstanceExtensions(window, &extensionCount, &extensionNames[0])
+        {
+            fmt.println("Could not get Instance Extensions")
+        }
+        check_validation_layer_support()
     }
-    check_validation_layer_support()
-    
     vkInstance : VK.Instance
     {
         appInfo := VK.ApplicationInfo{
@@ -122,7 +125,7 @@ main :: proc()
             VK.KHR_DEPTH_STENCIL_RESOLVE_EXTENSION_NAME,
                 VK.KHR_CREATE_RENDERPASS_2_EXTENSION_NAME,
             VK.EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME,
-            //VK.EXT_SHADER_OBJECT_EXTENSION_NAME,
+            VK.EXT_SHADER_OBJECT_EXTENSION_NAME,
         VK.NV_FILL_RECTANGLE_EXTENSION_NAME,
     }
 
@@ -197,12 +200,16 @@ main :: proc()
 
     device : VK.Device
     {
-        dynRen := VK.PhysicalDeviceDynamicRenderingFeatures{
-            sType = .PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES,
+        shaderObjects := VK.PhysicalDeviceShaderObjectFeaturesEXT{
+            sType = .PHYSICAL_DEVICE_SHADER_OBJECT_FEATURES_EXT,
+        }
+        features1_3 := VK.PhysicalDeviceVulkan13Features{
+            sType = .PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
+            pNext = &shaderObjects,
         }
         extState3 := VK.PhysicalDeviceExtendedDynamicState3FeaturesEXT{
             sType = .PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_3_FEATURES_EXT,
-            pNext = &dynRen,
+            pNext = &features1_3,
         }
         deviceFeatures := VK.PhysicalDeviceFeatures2{
             sType = .PHYSICAL_DEVICE_FEATURES_2,
@@ -235,146 +242,56 @@ main :: proc()
             case VKR.MakeSwapchainError: panic(fmt.aprintln("Swapchain error:", v))
         } 
     }
-    
-    
-    //Pipeline init
-    pipeline : VK.Pipeline
+
+    //CREATE SHADER OBJECTS
+    shaders : [2]VK.ShaderEXT
+    shaderStages : [len(shaders)]VK.ShaderStageFlags
     {
-        pipelineCreateInfo := VK.GraphicsPipelineCreateInfo{
-            sType = .GRAPHICS_PIPELINE_CREATE_INFO,
-            flags = {},
-        }
-        //Shader modules
-        {
-            vertModule : VK.ShaderModule
-            {
-                bytecode := #load("Shaders/compiled/shader.vert.spv", []byte)
-                createInfo := VK.ShaderModuleCreateInfo{
-                    sType = .SHADER_MODULE_CREATE_INFO,
-                    codeSize = len(bytecode),
-                    pCode = cast(^u32)raw_data(bytecode)
-                }
-                try(VK.CreateShaderModule(device, &createInfo, nil, &vertModule))
-            }
-            fragModule : VK.ShaderModule
-            {
-                bytecode := #load("Shaders/compiled/shader.frag.spv", []byte)
-                createInfo := VK.ShaderModuleCreateInfo{
-                    sType = .SHADER_MODULE_CREATE_INFO,
-                    codeSize = len(bytecode),
-                    pCode = cast(^u32)raw_data(bytecode)
-                }
-                try(VK.CreateShaderModule(device, &createInfo, nil, &fragModule))
-            }
-
-            stages : [2]VK.PipelineShaderStageCreateInfo
-            stages[0] = {
-                sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-
-                stage = { .VERTEX },
-                module = vertModule,
-                pName = "main", 
-            }
-            stages[1] = {
-                sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-
-                stage = { .FRAGMENT },
-                module = fragModule,
-                pName = "main",
-            }
-            pipelineCreateInfo.stageCount = len(stages)
-            pipelineCreateInfo.pStages = raw_data(stages[:])
-
-            {
-                createInfo := VK.PipelineLayoutCreateInfo{
-                    sType = .PIPELINE_LAYOUT_CREATE_INFO,
-
-                    setLayoutCount = 0,
-                    pSetLayouts = nil,
-                    pushConstantRangeCount = 0,
-                    pPushConstantRanges = nil,
-                }
-
-                try(VK.CreatePipelineLayout(device, &createInfo, nil, &pipelineCreateInfo.layout))
-            }
-        }
-
-        {
-            using pipelineCreateInfo
-            pVertexInputState = &VK.PipelineVertexInputStateCreateInfo{
-                sType = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-
-                vertexBindingDescriptionCount = 0,
-                vertexAttributeDescriptionCount = 0,
-            }
-            
-            pInputAssemblyState = &VK.PipelineInputAssemblyStateCreateInfo{
-                sType = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-
-                topology = .TRIANGLE_LIST,
-                primitiveRestartEnable = false,
-            }
-            pRasterizationState = &VK.PipelineRasterizationStateCreateInfo{
-                sType = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-
-                depthClampEnable = false,
-                rasterizerDiscardEnable = false,
-                polygonMode = .FILL,
-
-                lineWidth = 1,
-                cullMode = {},
-                frontFace = .CLOCKWISE,
-                depthBiasEnable = false,
-                depthBiasClamp = 0,
-                depthBiasConstantFactor = 0,
-                depthBiasSlopeFactor = 0,
-            }
-
-            pMultisampleState = &VK.PipelineMultisampleStateCreateInfo{
-                sType = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-
-                sampleShadingEnable = false,
-                rasterizationSamples = {._1},
-                minSampleShading = 1,
-                alphaToCoverageEnable = false,
-                alphaToOneEnable = false,
-            }
-
-            pColorBlendState = &VK.PipelineColorBlendStateCreateInfo{
-                sType = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
-                
-                logicOpEnable = false,
-                logicOp = .COPY,
-                attachmentCount = 0,
-                pAttachments = &VK.PipelineColorBlendAttachmentState{
-                    colorWriteMask = {.R, .G, .B, .A},
-                    blendEnable = false,
-                }
-            }
+        v := #load("./Shaders/compiled/shader.vert.spv", []byte)
+        vert := try(mem.make_aligned([]byte, len(v), 4))
+        copy(vert, v)
+        defer delete(vert)
         
-            pViewportState = &VK.PipelineViewportStateCreateInfo{
-                sType = .PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+        f := #load("./Shaders/compiled/shader.frag.spv", []byte)
+        frag := try(mem.make_aligned([]byte, len(f), 4))
+        copy(frag, f)
+        defer delete(frag)
 
-                viewportCount = 1,
-                pViewports = &VK.Viewport{
-                    x = 0,
-                    y = 0,
-                    width = f32(dimensions.x),
-                    height = f32(dimensions.y),
-                    minDepth = 0,
-                    maxDepth = 1,
-                },
-                scissorCount = 1,
-                pScissors = &VK.Rect2D{
-                    offset = {0, 0},
-                    extent = {dimensions.x, dimensions.y},
-                }
+        createInfos := [len(shaders)]VK.ShaderCreateInfoEXT{
+            //VertexShader = 
+            {
+                sType = .SHADER_CREATE_INFO_EXT,
+
+                flags = {.LINK_STAGE},
+                stage = {.VERTEX},
+                nextStage = {.FRAGMENT},
+                
+                codeType = .SPIRV,
+                codeSize = len(vert),
+                pCode = raw_data(vert),
+                pName = "main",
+                setLayoutCount = 0,
+            },
+            //FragmentShader =
+            {
+                sType = .SHADER_CREATE_INFO_EXT,
+
+                flags = {.LINK_STAGE},
+                stage = {.FRAGMENT},
+                nextStage = {},
+
+                codeType = .SPIRV,
+                codeSize = len(frag),
+                pCode = raw_data(frag),
+                pName = "main",
+                setLayoutCount = 0,
             }
         }
-
-        try(VK.CreateGraphicsPipelines(device, {}, 1, &pipelineCreateInfo, nil, &pipeline))   
+        try(VK.CreateShadersEXT(device, len(createInfos), &createInfos[0], nil, &shaders[0]))
+        shaderStages[0] = {.VERTEX}
+        shaderStages[1] = {.FRAGMENT}
     }
-
+    
     commandPool : VK.CommandPool
     {
         createInfo := VK.CommandPoolCreateInfo{
@@ -399,6 +316,24 @@ main :: proc()
         try(VK.AllocateCommandBuffers(device, &allocInfo, &commandBuffer))     
     }
     
+    imageAvailable, renderFinished : VK.Semaphore
+    {
+        createInfo := VK.SemaphoreCreateInfo{
+            sType = .SEMAPHORE_CREATE_INFO,
+        }
+        try(VK.CreateSemaphore(device, &createInfo, nil, &imageAvailable))
+        try(VK.CreateSemaphore(device, &createInfo, nil, &renderFinished))
+    }
+    
+    inFlightFence : VK.Fence
+    {
+        createInfo := VK.FenceCreateInfo{
+            sType = .FENCE_CREATE_INFO,
+            flags = { .SIGNALED },
+        }
+        try(VK.CreateFence(device, &createInfo, nil, &inFlightFence))
+    }
+
     renderingInfo := VK.RenderingInfo{
         sType = .RENDERING_INFO_KHR,
 
@@ -406,6 +341,7 @@ main :: proc()
         renderArea = {{0, 0}, {dimensions.x, dimensions.y}},
         layerCount = 1,
         colorAttachmentCount = 1,
+        
         pColorAttachments = &VK.RenderingAttachmentInfo{
             sType = .RENDERING_ATTACHMENT_INFO,
 
@@ -416,23 +352,19 @@ main :: proc()
             clearValue = {color = {float32 = {0, 0, 0, 1}}}
         }
     }
-    imageAvailable, renderFinished : VK.Semaphore
+
+    imageIndex : u32
     {
-        createInfo := VK.SemaphoreCreateInfo{
-            sType = .SEMAPHORE_CREATE_INFO,
-        }
-        try(VK.CreateSemaphore(device, &createInfo, nil, &imageAvailable))
-        try(VK.CreateSemaphore(device, &createInfo, nil, &renderFinished))
-    }
-    fence : VK.Fence
-    {
-        createInfo := VK.FenceCreateInfo{
-            sType = .FENCE_CREATE_INFO,
-            flags = { .SIGNALED },
-        }
-        try(VK.CreateFence(device, &createInfo, nil, &fence))
+        try(VK.WaitForFences(device, 1, &inFlightFence, true, max(u64)))
+        
+        try(VK.AcquireNextImageKHR(device, swapchain.Swapchain, max(u64),
+                                   imageAvailable, 0, &imageIndex))
+        
+        try(VK.ResetFences(device, 1, &inFlightFence))
+        try(VK.ResetCommandBuffer(commandBuffer, {}))
     }
 
+    //BEGIN COMMAND BUFFER
     {
         beginInfo := VK.CommandBufferBeginInfo{
             sType = .COMMAND_BUFFER_BEGIN_INFO,
@@ -442,13 +374,115 @@ main :: proc()
 
         try(VK.BeginCommandBuffer(commandBuffer, &beginInfo))
     }
-  
+    //PIPELINE BARRIER
+    {
+        imageBarrier := VK.ImageMemoryBarrier{
+            sType = .IMAGE_MEMORY_BARRIER,
+            dstAccessMask = {.COLOR_ATTACHMENT_WRITE},
+            srcAccessMask = {},
+            oldLayout = .UNDEFINED,
+            newLayout = .COLOR_ATTACHMENT_OPTIMAL,
+            image = swapchain.Images[0],
+            subresourceRange = {
+                aspectMask = {.COLOR},
+                baseMipLevel = 0,
+                levelCount = 1,
+                baseArrayLayer = 0,
+                layerCount = 1,
+            }
+        }
+        VK.CmdPipelineBarrier(commandBuffer,
+            {.TOP_OF_PIPE},
+            {.COLOR_ATTACHMENT_OUTPUT},
+            {},
+            {},
+            nil,
+            {},
+            nil,
+            1,
+            &imageBarrier
+        )
+    }
     VK.CmdBeginRendering(commandBuffer, &renderingInfo)
-    
-    VK.CmdBindPipeline(commandBuffer, .GRAPHICS, pipeline)
+    {
+        viewport := VK.Viewport{0, 0, f32(dimensions.x), f32(dimensions.y), 0, 1}
+        scissor := VK.Rect2D{{0,0}, {dimensions.x, dimensions.y}}
+        VK.CmdSetViewportWithCountEXT(commandBuffer, 1, &viewport)
+        VK.CmdSetScissorWithCountEXT(commandBuffer, 1, &scissor)
 
+        VK.CmdSetCullModeEXT(commandBuffer, {.BACK})
+        VK.CmdSetFrontFaceEXT(commandBuffer, .CLOCKWISE)
+        VK.CmdSetDepthTestEnableEXT(commandBuffer, true)
+        VK.CmdSetDepthWriteEnableEXT(commandBuffer, true)
+        VK.CmdSetDepthCompareOpEXT(commandBuffer, .LESS_OR_EQUAL)
+        VK.CmdSetPrimitiveTopologyEXT(commandBuffer, .TRIANGLE_LIST)
+        VK.CmdSetRasterizerDiscardEnableEXT(commandBuffer, true)
+        VK.CmdSetPolygonModeEXT(commandBuffer, .FILL)
+        VK.CmdSetRasterizationSamplesEXT(commandBuffer, {._1})
+        VK.CmdSetAlphaToCoverageEnableEXT(commandBuffer, false)
+        VK.CmdSetDepthBiasEnableEXT(commandBuffer, false)
+        VK.CmdSetStencilTestEnableEXT(commandBuffer, false)
+        VK.CmdSetPrimitiveRestartEnableEXT(commandBuffer, false)
+        VK.CmdSetPrimitiveRestartEnableEXT(commandBuffer, false)
+
+        mask := VK.SampleMask(0xFF)
+        VK.CmdSetSampleMaskEXT(commandBuffer, {._1}, &mask)
+        
+        blendEnable := b32(false)
+        VK.CmdSetColorBlendEnableEXT(commandBuffer, 0, 1, &blendEnable)
+
+        VK.CmdSetColorWriteMaskEXT(commandBuffer, 0, 1, &VK.ColorComponentFlags{.R, .G, .B, .A})
+        VK.CmdSetColorBlendEquationEXT(commandBuffer, 0, 1, 
+                                       &VK.ColorBlendEquationEXT{
+            srcColorBlendFactor = .SRC_ALPHA,
+            dstColorBlendFactor = .ONE_MINUS_SRC_ALPHA,
+            colorBlendOp = .ADD,
+
+            srcAlphaBlendFactor = .ONE,
+            dstAlphaBlendFactor = .ZERO,
+            alphaBlendOp = .ADD,
+        })
+    }
+    VK.CmdBindShadersEXT(commandBuffer, 2, &shaderStages[0], &shaders[0])
     VK.CmdDraw(commandBuffer, 3, 1, 0, 0)
     VK.CmdEndRendering(commandBuffer)
+
+
+    //DISPLAY
+    when false {
+        
+        try(VK.WaitForFences(device, 1, &inFlightFence, true, max(u64)))
+        
+        try(VK.AcquireNextImageKHR(device, swapchain.Swapchain, max(u64),
+                                   imageAvailable, 0, &imageIndex))
+        
+        try(VK.ResetFences(device, 1, &inFlightFence))
+        try(VK.ResetCommandBuffer(commandBuffer, {}))
+        
+        {
+            submitInfo := VK.SubmitInfo{
+                sType = .SUBMIT_INFO,
+                waitSemaphoreCount = 1,
+                pWaitSemaphores = &imageAvailable,
+                pWaitDstStageMask = &VK.PipelineStageFlags{.COLOR_ATTACHMENT_OUTPUT},
+                commandBufferCount = 1,
+                pCommandBuffers = &commandBuffer,
+                signalSemaphoreCount = 1,
+                pSignalSemaphores = &renderFinished,
+            }
+            try(VK.QueueSubmit(graphicsQueue, 1, &submitInfo, inFlightFence))
+            
+            presentInfo := VK.PresentInfoKHR{
+                sType = .PRESENT_INFO_KHR,
+                waitSemaphoreCount = 1,
+                pWaitSemaphores = &renderFinished,
+                swapchainCount = 1,
+                pSwapchains = &swapchain.Swapchain,
+                pImageIndices = &imageIndex,
+            }
+            try(VK.QueuePresentKHR(graphicsQueue, &presentInfo))
+        }
+    }
     proc() {panic("Ran successfully!\n")}()
     
 
@@ -472,13 +506,7 @@ main :: proc()
         
         Drawing:
         {
-            VK.CmdBeginRendering(commandBuffer, &renderingInfo)
-    
-            VK.CmdBindPipeline(commandBuffer, .GRAPHICS, pipeline)
-            //VK.CmdClearColorImage
-            //VK.CmdClear
-            VK.CmdDraw(commandBuffer, 3, 1, 0, 0)
-            VK.CmdEndRendering(commandBuffer)                  
+                         
         }
         
     }
@@ -486,6 +514,7 @@ main :: proc()
 
 try :: proc{
     VKR.try,
+    try_alloc_value,
 }
 try_sdl :: proc(r : c.int loc := #caller_location)
 {
@@ -493,6 +522,11 @@ try_sdl :: proc(r : c.int loc := #caller_location)
 
     error := SDL.GetError()
     panic(fmt.aprintf("%s", error), loc)
+}
+try_alloc_value :: proc(value : $T, error : runtime.Allocator_Error, loc := #caller_location) -> T
+{
+    if error != .None do panic(fmt.aprintfln("ALLOCATOR ERROR: %v", error), loc)
+    return value
 }
 not_nil :: proc(ptr : $T, loc := #caller_location)// where intrinsics.type_is_pointer(T) || intrinsics.type_is_proc(T)
 {

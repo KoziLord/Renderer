@@ -3,3 +3,4 @@ ols.json
 .vscode
 bin/*
 libs/*
+Shaders/compiled/*

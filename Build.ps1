@@ -7,8 +7,9 @@ foreach ($lib in $libs)
 
 If ($args -match "-shaders") 
 {
-    & .\Shaders\Compile.ps1
+    & ".\Shaders\Compile.ps1"
 }
+
 $command = If ($args -match "-ex") {"OdinEx "} Else {"odin "}
 
 $command += If ($args -match "-r") {"run "} Else {"build "}
