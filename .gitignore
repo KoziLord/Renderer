@@ -1,6 +1,6 @@
 ols.json
 .vs
 .vscode
-bin/*
-libs/*
-Shaders/compiled/*
+.spv
+bin/
+Shaders/compiled/
