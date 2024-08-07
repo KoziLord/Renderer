@@ -72,9 +72,10 @@ main :: proc()
         (cast(^rawptr) p)^ = cast(rawptr) ptr
     })
 
-    //SDL VULKAN EXTENSIONS
+    vkInstance : VK.Instance
     {
         extensionCount : c.uint
+        //SDL VULKAN EXTENSIONS
         if !SDL2.Vulkan_GetInstanceExtensions(window, &extensionCount, nil)
         {
             fmt.println("Could not get Instance Extensions count")
@@ -87,9 +88,8 @@ main :: proc()
             fmt.println("Could not get Instance Extensions")
         }
         check_validation_layer_support()
-    }
-    vkInstance : VK.Instance
-    {
+    
+    
         appInfo := VK.ApplicationInfo{
             sType = .APPLICATION_INFO,
             apiVersion = VK.API_VERSION_1_3,
@@ -349,7 +349,7 @@ main :: proc()
             imageLayout = .ATTACHMENT_OPTIMAL,
             loadOp = .CLEAR,
             storeOp = .STORE,
-            clearValue = {color = {float32 = {0, 0, 0, 1}}}
+            clearValue = {color = {float32 = {0.02, 0.05, 0.09, 1}}}
         }
     }
 
@@ -382,7 +382,7 @@ main :: proc()
             srcAccessMask = {},
             oldLayout = .UNDEFINED,
             newLayout = .COLOR_ATTACHMENT_OPTIMAL,
-            image = swapchain.Images[0],
+            image = swapchain.Images[imageIndex],
             subresourceRange = {
                 aspectMask = {.COLOR},
                 baseMipLevel = 0,
@@ -416,17 +416,23 @@ main :: proc()
         VK.CmdSetDepthWriteEnableEXT(commandBuffer, true)
         VK.CmdSetDepthCompareOpEXT(commandBuffer, .LESS_OR_EQUAL)
         VK.CmdSetPrimitiveTopologyEXT(commandBuffer, .TRIANGLE_LIST)
-        VK.CmdSetRasterizerDiscardEnableEXT(commandBuffer, true)
+
+        VK.CmdSetRasterizerDiscardEnableEXT(commandBuffer, false)
+        VK.CmdSetAlphaToOneEnableEXT(commandBuffer, false)
+        VK.CmdSetLogicOpEnableEXT(commandBuffer, false)
+
         VK.CmdSetPolygonModeEXT(commandBuffer, .FILL)
-        VK.CmdSetRasterizationSamplesEXT(commandBuffer, {._1})
+        VK.CmdSetRasterizationSamplesEXT(commandBuffer, {._16})
         VK.CmdSetAlphaToCoverageEnableEXT(commandBuffer, false)
         VK.CmdSetDepthBiasEnableEXT(commandBuffer, false)
         VK.CmdSetStencilTestEnableEXT(commandBuffer, false)
         VK.CmdSetPrimitiveRestartEnableEXT(commandBuffer, false)
         VK.CmdSetPrimitiveRestartEnableEXT(commandBuffer, false)
-
+        VK.CmdSetDepthBoundsTestEnable(commandBuffer, false)
+        VK.CmdSetDepthClampEnableEXT(commandBuffer, false)
+        
         mask := VK.SampleMask(0xFF)
-        VK.CmdSetSampleMaskEXT(commandBuffer, {._1}, &mask)
+        VK.CmdSetSampleMaskEXT(commandBuffer, {._16}, &mask)
         
         blendEnable := b32(false)
         VK.CmdSetColorBlendEnableEXT(commandBuffer, 0, 1, &blendEnable)
@@ -444,21 +450,50 @@ main :: proc()
         })
     }
     VK.CmdBindShadersEXT(commandBuffer, 2, &shaderStages[0], &shaders[0])
+    //Get unused shaders out of our way
+{
+    VK.CmdBindShadersEXT(commandBuffer, 1, &VK.ShaderStageFlags{.TESSELLATION_EVALUATION}, nil)
+    VK.CmdBindShadersEXT(commandBuffer, 1, &VK.ShaderStageFlags{.TESSELLATION_CONTROL}, nil)
+    VK.CmdBindShadersEXT(commandBuffer, 1, &VK.ShaderStageFlags{.GEOMETRY}, nil)
+    VK.CmdBindShadersEXT(commandBuffer, 1, &VK.ShaderStageFlags{.COMPUTE}, nil)
+}
     VK.CmdDraw(commandBuffer, 3, 1, 0, 0)
     VK.CmdEndRendering(commandBuffer)
 
+    {
+        imageBarrier := VK.ImageMemoryBarrier{
+            sType = .IMAGE_MEMORY_BARRIER,
+            dstAccessMask = {},
+            srcAccessMask = {.COLOR_ATTACHMENT_WRITE},
+            oldLayout = .COLOR_ATTACHMENT_OPTIMAL,
+            newLayout = .PRESENT_SRC_KHR,
+            image = swapchain.Images[imageIndex],
+            subresourceRange = {
+                aspectMask = {.COLOR},
+                baseMipLevel = 0,
+                levelCount = 1,
+                baseArrayLayer = 0,
+                layerCount = 1,
+            }
+        }
+        VK.CmdPipelineBarrier(commandBuffer,
+            {.COLOR_ATTACHMENT_OUTPUT},
+            {.BOTTOM_OF_PIPE},
+            {},
+            {},
+            nil,
+            {},
+            nil,
+            1,
+            &imageBarrier
+        )
+    }
+
+    try(VK.EndCommandBuffer(commandBuffer))
 
     //DISPLAY
-    when false {
-        
-        try(VK.WaitForFences(device, 1, &inFlightFence, true, max(u64)))
-        
-        try(VK.AcquireNextImageKHR(device, swapchain.Swapchain, max(u64),
-                                   imageAvailable, 0, &imageIndex))
-        
-        try(VK.ResetFences(device, 1, &inFlightFence))
-        try(VK.ResetCommandBuffer(commandBuffer, {}))
-        
+    when true {
+                
         {
             submitInfo := VK.SubmitInfo{
                 sType = .SUBMIT_INFO,
@@ -483,7 +518,7 @@ main :: proc()
             try(VK.QueuePresentKHR(graphicsQueue, &presentInfo))
         }
     }
-    proc() {panic("Ran successfully!\n")}()
+    //proc() {panic("Ran successfully!\n")}()
     
 
     run := true
